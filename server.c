@@ -13,7 +13,7 @@
 
 #define BACKLOG 1
 #define SAMPL_PER_SEG 30
-#define FILE_NAME "lindy.flac"
+#define FILENAME_LEN 50
 
 void sendMetadata(int fd, drflac* flacFile){
 	// Necessarry casting
@@ -130,15 +130,41 @@ int main(int argc, char* argv[]){
 	int newfd;
 	uint8_t waiting = 1;
 	while(waiting){
+		// Waiting for client
 		addrSize = sizeof(clientAddr);
 		newfd = accept(sockfd, (struct sockaddr*)&clientAddr, &addrSize);
 		if (newfd == -1){
 			perror("accept");
 			continue;
 		}
-		drflac* flacFile = drflac_open_file(FILE_NAME, NULL);
+
+		// Recieve flac filename
+		drflac* flacFile;
+		char fileName[FILENAME_LEN];
+		uint8_t findingFlac = 1;
+		while(findingFlac){
+			recv(newfd, fileName, FILENAME_LEN, 0);
+
+			flacFile = drflac_open_file(fileName, NULL);
+			if (flacFile == NULL){
+				fprintf(stderr, "drflac_open_file : issue opening file \"%s\"\n", fileName);
+			}
+			else{
+				findingFlac = 0;
+			}
+
+			if (send(newfd, &findingFlac, sizeof(findingFlac), 0) == -1){
+				perror("send");
+				exit(EXIT_FAILURE);
+			}
+		}
+		printf("Attempting to stream \"%s\"\n", fileName);
+
+		// Send flac data
 		sendMetadata(newfd, flacFile);
 		sendPCM(newfd, flacFile);
+
+		// Wrap up sending
 		drflac_close(flacFile);
 		waiting = 0;
 	}

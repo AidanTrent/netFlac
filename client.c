@@ -10,6 +10,7 @@
 #include <ao/ao.h>
 
 #define SAMPL_PER_SEG 30
+#define FILENAME_LEN 50
 
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
@@ -116,6 +117,26 @@ int main(int argc, char* argv[]){
 
 	struct addrinfo *servInfo = getServerInfo(argv[1], argv[2]);
 	int sockfd = socketAndConnect(servInfo);
+
+
+	uint8_t findingFlac = 1;
+	while(findingFlac){
+		char fileName[FILENAME_LEN];
+		printf("Enter the flac's file name : ");
+		scanf("%s", fileName);
+		if (send(sockfd, fileName, FILENAME_LEN, 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
+		}
+
+		if (recv(sockfd, &findingFlac, sizeof(findingFlac), 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
+		}
+		if (findingFlac){
+			printf("flac file \"%s\" does not exist on server...\n", fileName);
+		}
+	}
 
 	// Perpare audio
 	int driver_id;
