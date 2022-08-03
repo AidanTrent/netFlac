@@ -58,6 +58,31 @@ void sendPCM(int fd, drflac* flacFile){
 	close(fd);
 }
 
+// Recives filenames from the client until there is a match with a flac file
+drflac* findFlac(int fd){
+	char fileName[FILENAME_LEN];
+	uint8_t findingFlac = 1;
+	drflac* flacFile;
+
+	while(findingFlac){
+		recv(fd, fileName, FILENAME_LEN, 0);
+
+		flacFile = drflac_open_file(fileName, NULL);
+		if (flacFile == NULL){
+			fprintf(stderr, "drflac_open_file : issue opening file \"%s\"\n", fileName);
+		}
+		else{
+			findingFlac = 0;
+		}
+
+		if (send(fd, &findingFlac, sizeof(findingFlac), 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
+		}
+	}
+	return flacFile;
+}
+
 // Finds suitible socket and binds it
 int socketAndBind(struct addrinfo* localInfo){
 	struct addrinfo* cur;
@@ -138,27 +163,9 @@ int main(int argc, char* argv[]){
 			continue;
 		}
 
-		// Recieve flac filename
-		drflac* flacFile;
-		char fileName[FILENAME_LEN];
-		uint8_t findingFlac = 1;
-		while(findingFlac){
-			recv(newfd, fileName, FILENAME_LEN, 0);
-
-			flacFile = drflac_open_file(fileName, NULL);
-			if (flacFile == NULL){
-				fprintf(stderr, "drflac_open_file : issue opening file \"%s\"\n", fileName);
-			}
-			else{
-				findingFlac = 0;
-			}
-
-			if (send(newfd, &findingFlac, sizeof(findingFlac), 0) == -1){
-				perror("send");
-				exit(EXIT_FAILURE);
-			}
-		}
-		printf("Attempting to stream \"%s\"\n", fileName);
+		// Find desired flac file
+		drflac* flacFile = findFlac(newfd);
+		fprintf(stderr, "\n%d\n", flacFile->bitsPerSample);
 
 		// Send flac data
 		sendMetadata(newfd, flacFile);

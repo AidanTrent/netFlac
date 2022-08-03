@@ -68,6 +68,29 @@ ao_device* openLive(int driver_id, ao_sample_format *format){
 	return device;
 }
 
+// Takes user input to send a file name to the server. Will continue taking user
+// input until the server replies that the file exists.
+void requestFlac(int fd){
+	uint8_t findingFlac = 1;
+	while(findingFlac){
+		char fileName[FILENAME_LEN];
+		printf("Enter the flac's file name : ");
+		scanf("%s", fileName);
+		if (send(fd, fileName, FILENAME_LEN, 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
+		}
+
+		if (recv(fd, &findingFlac, sizeof(findingFlac), 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
+		}
+		if (findingFlac){
+			fprintf(stderr, "flac file \"%s\" does not exist on server...\n", fileName);
+		}
+	}
+}
+
 int socketAndConnect(struct addrinfo* servInfo){
 	// Find suitible address
 	struct addrinfo* cur;
@@ -118,25 +141,7 @@ int main(int argc, char* argv[]){
 	struct addrinfo *servInfo = getServerInfo(argv[1], argv[2]);
 	int sockfd = socketAndConnect(servInfo);
 
-
-	uint8_t findingFlac = 1;
-	while(findingFlac){
-		char fileName[FILENAME_LEN];
-		printf("Enter the flac's file name : ");
-		scanf("%s", fileName);
-		if (send(sockfd, fileName, FILENAME_LEN, 0) == -1){
-			perror("send");
-			exit(EXIT_FAILURE);
-		}
-
-		if (recv(sockfd, &findingFlac, sizeof(findingFlac), 0) == -1){
-			perror("send");
-			exit(EXIT_FAILURE);
-		}
-		if (findingFlac){
-			printf("flac file \"%s\" does not exist on server...\n", fileName);
-		}
-	}
+	requestFlac(sockfd);
 
 	// Perpare audio
 	int driver_id;
