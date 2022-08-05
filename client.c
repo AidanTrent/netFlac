@@ -51,7 +51,6 @@ void recvPCM(int fd, ao_device* device, uint32_t segSize){
 				recieving = 0;
 			}
 		}
-
 	}
 
 	free(seg);
@@ -134,7 +133,7 @@ struct addrinfo* getServerInfo(char* addr, char* port){
 
 int main(int argc, char* argv[]){
 	if (argc != 3) {
-		fprintf(stderr, "USAGE : socketTest ADDRESS PORT\n");
+		fprintf(stderr, "USAGE : client ADDRESS PORT\n");
 		exit(EXIT_FAILURE);
 	}
 

@@ -134,7 +134,7 @@ struct addrinfo* getLocalInfo(char* port){
 
 int main(int argc, char* argv[]){
 	if (argc != 2) {
-		fprintf(stderr, "USAGE : socketTest ADDRESS...\n");
+		fprintf(stderr, "USAGE : server Port...\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -165,7 +165,6 @@ int main(int argc, char* argv[]){
 
 		// Find desired flac file
 		drflac* flacFile = findFlac(newfd);
-		fprintf(stderr, "\n%d\n", flacFile->bitsPerSample);
 
 		// Send flac data
 		sendMetadata(newfd, flacFile);
