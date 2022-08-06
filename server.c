@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <pthread.h>
 
 #define DR_FLAC_IMPLEMENTATION
 #include <dr_flac.h>
@@ -58,7 +59,7 @@ void sendPCM(int fd, drflac* flacFile){
 	close(fd);
 }
 
-// Recives filenames from the client until there is a match with a flac file
+// Receives filenames from the client until there is a match with a flac file
 drflac* findFlac(int fd){
 	char fileName[FILENAME_LEN];
 	uint8_t findingFlac = 1;
@@ -132,9 +133,24 @@ struct addrinfo* getLocalInfo(char* port){
 	return localInfo;
 }
 
+void* flacRoutine(void* fdArg){
+	int* fd = fdArg;
+
+	// Find desired flac file
+	drflac* flacFile = findFlac(*fd);
+
+	// Send flac data
+	sendMetadata(*fd, flacFile);
+	sendPCM(*fd, flacFile);
+
+	// Wrap up sending
+	drflac_close(flacFile);
+	pthread_exit(NULL);
+}
+
 int main(int argc, char* argv[]){
 	if (argc != 2) {
-		fprintf(stderr, "USAGE : server Port...\n");
+		fprintf(stderr, "USAGE : server PORT...\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -153,8 +169,8 @@ int main(int argc, char* argv[]){
 	struct sockaddr_storage clientAddr;
 	socklen_t addrSize;
 	int newfd;
-	uint8_t waiting = 1;
-	while(waiting){
+	uint8_t running = 1;
+	while(running){
 		// Waiting for client
 		addrSize = sizeof(clientAddr);
 		newfd = accept(sockfd, (struct sockaddr*)&clientAddr, &addrSize);
@@ -163,16 +179,11 @@ int main(int argc, char* argv[]){
 			continue;
 		}
 
-		// Find desired flac file
-		drflac* flacFile = findFlac(newfd);
-
-		// Send flac data
-		sendMetadata(newfd, flacFile);
-		sendPCM(newfd, flacFile);
-
-		// Wrap up sending
-		drflac_close(flacFile);
-		waiting = 0;
+		pthread_t frThread;
+		pthread_create(&frThread, NULL, flacRoutine, &newfd);
+		// Exiting
+		pthread_join(frThread, NULL);
+		//running = 0;
 	}
 
 	close(newfd);

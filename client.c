@@ -8,9 +8,16 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <ao/ao.h>
+#include <pthread.h>
 
 #define SAMPL_PER_SEG 30
 #define FILENAME_LEN 50
+
+struct recvPCMargs{
+	int fd;
+	ao_device* device;
+	uint32_t segSize;
+};
 
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
@@ -28,33 +35,35 @@ ao_sample_format recvFormat(int fd){
 	return format;
 }
 
-void recvPCM(int fd, ao_device* device, uint32_t segSize){
-	char* seg = malloc(segSize);
+void* recvPCM(void* args){
+	struct recvPCMargs* pcmArgs = args;
+	char* seg = malloc(pcmArgs->segSize);
 
 	int16_t recvBytes; // Must be signed for errors
 	int segProg;
-	uint8_t recieving = 1;
-	while (recieving){
+	uint8_t receiving = 1;
+	while (receiving){
 		segProg = 0;
-		while (segProg != segSize){
-			recvBytes = recv(fd, seg, segSize - segProg, 0);
+		while (segProg != pcmArgs->segSize){
+			recvBytes = recv(pcmArgs->fd, seg, pcmArgs->segSize - segProg, 0);
 			if (recvBytes == -1){
 				perror("recv");
 				exit(EXIT_FAILURE);
 			}
-			ao_play(device, seg, recvBytes);
+			ao_play(pcmArgs->device, seg, recvBytes);
 			segProg += recvBytes;
 
 			// Exit when server is no longer sending
 			if (recvBytes == 0){
-				segProg = segSize;
-				recieving = 0;
+				segProg = pcmArgs->segSize;
+				receiving = 0;
 			}
 		}
 	}
 
 	free(seg);
-	close(fd);
+	close(pcmArgs->fd);
+	pthread_exit(NULL);
 }
 
 ao_device* openLive(int driver_id, ao_sample_format *format){
@@ -164,9 +173,12 @@ int main(int argc, char* argv[]){
 
 	// Receive and play pcm
 	uint32_t segSize = (format.bits * 2) * SAMPL_PER_SEG;
-	recvPCM(sockfd, device, segSize);
+	struct recvPCMargs pcmArgs = {sockfd, device, segSize};
+	pthread_t pcmThread;
+	pthread_create(&pcmThread, NULL, recvPCM, &pcmArgs);
 
 	// Exiting
+	pthread_join(pcmThread, NULL);
 	freeaddrinfo(servInfo);
 	ao_close(device);
 	ao_shutdown();
