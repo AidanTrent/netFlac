@@ -10,7 +10,7 @@
 #include <pthread.h>
 
 #define DR_FLAC_IMPLEMENTATION
-#include <dr_flac.h>
+#include "dr_flac.h"
 
 #define BACKLOG 1
 #define SAMPL_PER_SEG 30
@@ -53,7 +53,7 @@ void sendPCM(int fd, drflac* flacFile){
 		memcpy(seg, pos, segSize);
 		if (send(fd, seg, segSize, 0) == -1){
 			perror("send");
-			exit(EXIT_FAILURE);
+			break;
 		}
 	}
 	close(fd);
@@ -66,7 +66,10 @@ drflac* findFlac(int fd){
 	drflac* flacFile;
 
 	while(findingFlac){
-		recv(fd, fileName, FILENAME_LEN, 0);
+		if (recv(fd, fileName, FILENAME_LEN, 0) == 0){
+			fprintf(stderr, "findFlac : client has closed the connection\n");
+			return NULL;
+		}
 
 		flacFile = drflac_open_file(fileName, NULL);
 		if (flacFile == NULL){
@@ -139,12 +142,13 @@ void* flacRoutine(void* fdArg){
 	// Find desired flac file
 	drflac* flacFile = findFlac(*fd);
 
-	// Send flac data
-	sendMetadata(*fd, flacFile);
-	sendPCM(*fd, flacFile);
+	if (flacFile != NULL){
+		// Send flac data
+		sendMetadata(*fd, flacFile);
+		sendPCM(*fd, flacFile);
 
-	// Wrap up sending
-	drflac_close(flacFile);
+		drflac_close(flacFile);
+	}
 	pthread_exit(NULL);
 }
 
@@ -178,6 +182,12 @@ int main(int argc, char* argv[]){
 			perror("accept");
 			continue;
 		}
+
+		char ip[INET_ADDRSTRLEN];
+		struct sockaddr_in* clientAddrConv = (struct sockaddr_in*)&clientAddr;
+		inet_ntop(AF_INET, &clientAddrConv->sin_addr, ip, INET_ADDRSTRLEN);
+		printf("Accepted client @ %s\n", ip);
+
 
 		pthread_t frThread;
 		pthread_create(&frThread, NULL, flacRoutine, &newfd);
