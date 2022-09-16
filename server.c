@@ -16,13 +16,23 @@
 #define SAMPL_PER_SEG 30
 #define FILENAME_LEN 50
 
+// TODO : Add a passphrase
+
+// TODO : Proper error handling for send here. An issue here is basically
+// impossible but it's still a potential way to "crash" the server
 void sendMetadata(int fd, drflac* flacFile){
 	// Necessarry casting
-	int bits = flacFile->bitsPerSample * 2;
+	int bps = flacFile->bitsPerSample;
+	if (bps > 16){
+		bps = 32;
+	}
+	else{
+		bps = 16;
+	}
 	int rate = flacFile->sampleRate;
 	int channels = flacFile->channels;
 
-	if (send(fd, &bits, sizeof(int), 0) == -1){
+	if (send(fd, &bps, sizeof(int), 0) == -1){
 		perror("send");
 		exit(EXIT_FAILURE);
 	}
@@ -37,10 +47,12 @@ void sendMetadata(int fd, drflac* flacFile){
 }
 
 // TODO : Remainder of all segments results in some truncated data. Fix this
-void sendPCM(int fd, drflac* flacFile){
+void sendPCM32(int fd, drflac* flacFile){
 	// Get PCM data
 	uint32_t pcmBytes = (flacFile->totalPCMFrameCount * flacFile->channels * sizeof(uint32_t));
+
 	int32_t* pcmData = malloc(pcmBytes);
+
 	drflac_read_pcm_frames_s32(flacFile, flacFile->totalPCMFrameCount, pcmData);
 
 	// Serialize
@@ -50,6 +62,31 @@ void sendPCM(int fd, drflac* flacFile){
 	// Send out segments
 	for (int x = 0; x < pcmBytes; x += segSize){
 		int32_t* pos = &pcmData[x / 4]; // Conversion to index 32 bit
+		memcpy(seg, pos, segSize);
+		if (send(fd, seg, segSize, 0) == -1){
+			perror("send");
+			break;
+		}
+	}
+	close(fd);
+}
+
+// TODO : Remainder of all segments results in some truncated data. Fix this
+void sendPCM16(int fd, drflac* flacFile){
+	// Get PCM data
+	uint32_t pcmBytes = (flacFile->totalPCMFrameCount * flacFile->channels * sizeof(uint32_t));
+
+	int16_t* pcmData = malloc(pcmBytes);
+
+	drflac_read_pcm_frames_s16(flacFile, flacFile->totalPCMFrameCount, pcmData);
+
+	// Serialize
+	uint32_t segSize = (flacFile->bitsPerSample * 2) * SAMPL_PER_SEG;
+	char* seg = malloc(segSize);
+
+	// Send out segments
+	for (int x = 0; x < pcmBytes; x += segSize){
+		int16_t* pos = &pcmData[x / 2]; // Conversion to index 16 bit
 		memcpy(seg, pos, segSize);
 		if (send(fd, seg, segSize, 0) == -1){
 			perror("send");
@@ -145,7 +182,13 @@ void* flacRoutine(void* fdArg){
 	if (flacFile != NULL){
 		// Send flac data
 		sendMetadata(*fd, flacFile);
-		sendPCM(*fd, flacFile);
+
+		if (flacFile->bitsPerSample > 16){
+			sendPCM32(*fd, flacFile);
+		}
+		else{
+			sendPCM16(*fd, flacFile);
+		}
 
 		drflac_close(flacFile);
 	}
@@ -183,12 +226,14 @@ int main(int argc, char* argv[]){
 			continue;
 		}
 
+		// Print out IP addr of connection
 		char ip[INET_ADDRSTRLEN];
 		struct sockaddr_in* clientAddrConv = (struct sockaddr_in*)&clientAddr;
 		inet_ntop(AF_INET, &clientAddrConv->sin_addr, ip, INET_ADDRSTRLEN);
 		printf("Accepted client @ %s\n", ip);
 
 
+		// Begin stream
 		pthread_t frThread;
 		pthread_create(&frThread, NULL, flacRoutine, &newfd);
 		// Exiting
