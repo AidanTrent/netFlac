@@ -12,20 +12,13 @@
 
 // TODO : put these into a constants header file
 #define SAMPL_PER_SEG 30
-#define FILENAME_LEN 50 // Max filename length is effectively 49 due to processing
+#define FILENAME_LEN 256 // Max filename length is effectively 255 due to processing
 
 struct recvPCMargs{
 	int fd;
 	ao_device* device;
 	uint32_t segSize;
 };
-
-typedef enum{
-	Null,
-	Quit,
-	Pause,
-	Play
-} inputCode;
 
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
@@ -36,7 +29,7 @@ ao_sample_format recvFormat(int fd){
 
 	format.byte_format = AO_FMT_NATIVE; // TODO : delegated by server?
 
-	printf("Format bits = %d\n", format.bits);
+	printf("Format bps = %d\n", format.bits);
 	printf("Format rate = %d\n", format.rate);
 	printf("Format channels = %d\n", format.channels);
 

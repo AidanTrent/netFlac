@@ -14,7 +14,7 @@
 
 #define BACKLOG 1
 #define SAMPL_PER_SEG 30
-#define FILENAME_LEN 50
+#define FILENAME_LEN 256
 
 // TODO : Add a passphrase
 
@@ -50,7 +50,6 @@ void sendMetadata(int fd, drflac* flacFile){
 void sendPCM32(int fd, drflac* flacFile){
 	// Get PCM data
 	uint32_t pcmBytes = (flacFile->totalPCMFrameCount * flacFile->channels * sizeof(uint32_t));
-
 	int32_t* pcmData = malloc(pcmBytes);
 
 	drflac_read_pcm_frames_s32(flacFile, flacFile->totalPCMFrameCount, pcmData);
@@ -75,7 +74,6 @@ void sendPCM32(int fd, drflac* flacFile){
 void sendPCM16(int fd, drflac* flacFile){
 	// Get PCM data
 	uint32_t pcmBytes = (flacFile->totalPCMFrameCount * flacFile->channels * sizeof(uint32_t));
-
 	int16_t* pcmData = malloc(pcmBytes);
 
 	drflac_read_pcm_frames_s16(flacFile, flacFile->totalPCMFrameCount, pcmData);
