@@ -14,11 +14,54 @@
 #define SAMPL_PER_SEG 30
 #define FILENAME_LEN 256 // Max filename length is effectively 255 due to processing
 
+typedef enum{
+	Null,
+	Quit,
+	Pause,
+	Play
+} inputCode;
+
 struct recvPCMargs{
 	int fd;
 	ao_device* device;
 	uint32_t segSize;
+	inputCode* globalCode;
 };
+
+void* usrCtrl(void* globalCodeVoid){
+	inputCode* globalCode = globalCodeVoid;
+	char usrIn;
+
+	uint8_t reading = 1;
+	while(reading){
+		printf("netFlac > ");
+		usrIn = getchar();
+		char bufCh;
+		while((bufCh = getchar()) != '\n' && bufCh != EOF); // Clear buffer
+
+		switch (usrIn){
+			case 'q':
+				*globalCode = Quit;
+				printf("Quiting...\n");
+				fflush(stdout);
+				reading = 0;
+				break;
+			case Play:
+				printf("Playing...\n");
+				fflush(stdout);
+				break;
+			case Pause:
+				printf("Pausing...\n");
+				fflush(stdout);
+				break;
+			default:
+				printf("Invalid input...\n");
+				fflush(stdout);
+				break;
+		}
+	}
+	pthread_exit(NULL);
+}
 
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
@@ -29,9 +72,9 @@ ao_sample_format recvFormat(int fd){
 
 	format.byte_format = AO_FMT_NATIVE; // TODO : delegated by server?
 
-	printf("Format bps = %d\n", format.bits);
-	printf("Format rate = %d\n", format.rate);
-	printf("Format channels = %d\n", format.channels);
+	printf("bps = %d\n", format.bits);
+	printf("sample rate = %d\n", format.rate);
+	printf("channels = %d\n", format.channels);
 
 	return format;
 }
@@ -44,7 +87,11 @@ void* recvPCM(void* args){
 	int segProg;
 	uint8_t receiving = 1;
 	while (receiving){
-		// TODO : check if playing yet to limit large buffer
+		if (*pcmArgs->globalCode == Quit){
+			break;
+		}
+
+		// TODO : buffering
 		segProg = 0;
 		while (segProg != pcmArgs->segSize){
 			recvBytes = recv(pcmArgs->fd, seg, pcmArgs->segSize - segProg, 0);
@@ -186,14 +233,23 @@ int main(int argc, char* argv[]){
 	// Open live playback
 	device = openLive(driver_id, &format);
 
+	// Initialize globalCode
+	inputCode code = Null;
+	inputCode* globalCode = &code;
+
 	// Start thread to receive and play pcm
 	uint32_t segSize = (format.bits * 2) * SAMPL_PER_SEG;
-	struct recvPCMargs pcmArgs = {sockfd, device, segSize};
+	struct recvPCMargs pcmArgs = {sockfd, device, segSize, globalCode};
 	pthread_t pcmThread;
 	pthread_create(&pcmThread, NULL, recvPCM, &pcmArgs);
 
+	// Start thread to take user input
+	pthread_t usrCtrlThread;
+	pthread_create(&usrCtrlThread, NULL, usrCtrl, globalCode);
+
 	// Exiting
 	pthread_join(pcmThread, NULL);
+	//pthread_join(usrCtrlThread, NULL);
 	freeaddrinfo(servInfo);
 	ao_close(device);
 	ao_shutdown();
