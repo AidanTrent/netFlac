@@ -10,14 +10,22 @@
 #include <ao/ao.h>
 #include <pthread.h>
 
+// TODO : put these into a constants header file
 #define SAMPL_PER_SEG 30
-#define FILENAME_LEN 50
+#define FILENAME_LEN 50 // Max filename length is effectively 49 due to processing
 
 struct recvPCMargs{
 	int fd;
 	ao_device* device;
 	uint32_t segSize;
 };
+
+typedef enum{
+	Null,
+	Quit,
+	Pause,
+	Play
+} inputCode;
 
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
@@ -43,6 +51,7 @@ void* recvPCM(void* args){
 	int segProg;
 	uint8_t receiving = 1;
 	while (receiving){
+		// TODO : check if playing yet to limit large buffer
 		segProg = 0;
 		while (segProg != pcmArgs->segSize){
 			recvBytes = recv(pcmArgs->fd, seg, pcmArgs->segSize - segProg, 0);
@@ -83,12 +92,25 @@ void requestFlac(int fd){
 	while(findingFlac){
 		char fileName[FILENAME_LEN];
 		printf("Enter the flac's file name : ");
-		scanf("%s", fileName);
+		fgets(fileName, FILENAME_LEN, stdin);
+
+		// Input processing
+		int nlnIndex = strcspn(fileName, "\n");
+		if (nlnIndex == (FILENAME_LEN - 1)){ // Overflow has occured
+			char bufCh;
+			while((bufCh = getchar()) != '\n' && bufCh != EOF); // Clear buffer
+		}
+		else{
+			fileName[nlnIndex] = 0; // Remove new line
+		}
+
+		// Send file name for check
 		if (send(fd, fileName, FILENAME_LEN, 0) == -1){
 			perror("send");
 			exit(EXIT_FAILURE);
 		}
 
+		// Recieve confimation of file's existance
 		if (recv(fd, &findingFlac, sizeof(findingFlac), 0) == -1){
 			perror("send");
 			exit(EXIT_FAILURE);
@@ -171,7 +193,7 @@ int main(int argc, char* argv[]){
 	// Open live playback
 	device = openLive(driver_id, &format);
 
-	// Receive and play pcm
+	// Start thread to receive and play pcm
 	uint32_t segSize = (format.bits * 2) * SAMPL_PER_SEG;
 	struct recvPCMargs pcmArgs = {sockfd, device, segSize};
 	pthread_t pcmThread;
