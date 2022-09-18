@@ -9,60 +9,87 @@
 #include <errno.h>
 #include <ao/ao.h>
 #include <pthread.h>
+#include "netflac.h"
 
-// TODO : put these into a constants header file
-#define SAMPL_PER_SEG 30
-#define FILENAME_LEN 256 // Max filename length is effectively 255 due to processing
+typedef struct{
+	int fd;
+	inputCode* globalCode;
+} usrCtrlArgs;
 
-typedef enum{
-	Null,
-	Quit,
-	Pause,
-	Play
-} inputCode;
-
-struct recvPCMargs{
+typedef struct{
 	int fd;
 	ao_device* device;
-	uint32_t segSize;
+	int segSize;
 	inputCode* globalCode;
-};
+} recvPCMargs;
 
-void* usrCtrl(void* globalCodeVoid){
-	inputCode* globalCode = globalCodeVoid;
+void* usrCtrl(void* voidArgs){
+	usrCtrlArgs* args = voidArgs;
+
 	char usrIn;
-
 	uint8_t reading = 1;
 	while(reading){
-		printf("netFlac > ");
 		usrIn = getchar();
 		char bufCh;
 		while((bufCh = getchar()) != '\n' && bufCh != EOF); // Clear buffer
 
 		switch (usrIn){
 			case 'q':
-				*globalCode = Quit;
+				*args->globalCode = Quit;
+				reading = 0;
 				printf("Quiting...\n");
 				fflush(stdout);
-				reading = 0;
 				break;
-			case Play:
-				printf("Playing...\n");
-				fflush(stdout);
-				break;
-			case Pause:
-				printf("Pausing...\n");
+			case 'p':
+				*args->globalCode = PlayPause;
+				printf("Play/Pause...\n");
 				fflush(stdout);
 				break;
 			default:
+				*args->globalCode = Null;
 				printf("Invalid input...\n");
 				fflush(stdout);
 				break;
+		}
+		if (send(args->fd, args->globalCode, sizeof(inputCode), 0) == -1){
+			perror("send");
+			exit(EXIT_FAILURE);
 		}
 	}
 	pthread_exit(NULL);
 }
 
+void* recvPCM(void* voidArgs){
+	recvPCMargs* args = voidArgs;
+	char* seg = malloc(args->segSize);
+
+	int recvBytes; // Must be signed for errors
+	int segProg;
+	uint8_t receiving = 1;
+	while (receiving){
+		// TODO : buffering
+		// PCM stream
+		segProg = 0;
+		while (segProg != args->segSize){
+			recvBytes = recv(args->fd, seg, args->segSize - segProg, 0);
+			recvErrChk("recvPCM", recvBytes);
+
+			ao_play(args->device, seg, recvBytes);
+			segProg += recvBytes;
+
+			// Exit when server is no longer sending
+			if (recvBytes == 0){
+				segProg = args->segSize;
+				receiving = 0;
+			}
+		}
+	}
+
+	free(seg);
+	pthread_exit(NULL);
+}
+
+// TODO : Proper error handling for recv here.
 ao_sample_format recvFormat(int fd){
 	ao_sample_format format;
 
@@ -77,42 +104,6 @@ ao_sample_format recvFormat(int fd){
 	printf("channels = %d\n", format.channels);
 
 	return format;
-}
-
-void* recvPCM(void* args){
-	struct recvPCMargs* pcmArgs = args;
-	char* seg = malloc(pcmArgs->segSize);
-
-	int16_t recvBytes; // Must be signed for errors
-	int segProg;
-	uint8_t receiving = 1;
-	while (receiving){
-		if (*pcmArgs->globalCode == Quit){
-			break;
-		}
-
-		// TODO : buffering
-		segProg = 0;
-		while (segProg != pcmArgs->segSize){
-			recvBytes = recv(pcmArgs->fd, seg, pcmArgs->segSize - segProg, 0);
-			if (recvBytes == -1){
-				perror("recv");
-				exit(EXIT_FAILURE);
-			}
-			ao_play(pcmArgs->device, seg, recvBytes);
-			segProg += recvBytes;
-
-			// Exit when server is no longer sending
-			if (recvBytes == 0){
-				segProg = pcmArgs->segSize;
-				receiving = 0;
-			}
-		}
-	}
-
-	free(seg);
-	close(pcmArgs->fd);
-	pthread_exit(NULL);
 }
 
 ao_device* openLive(int driver_id, ao_sample_format *format){
@@ -151,8 +142,7 @@ void requestFlac(int fd){
 		}
 
 		// Recieve confimation of file's existance
-		if (recv(fd, &findingFlac, sizeof(findingFlac), 0) == -1){
-			perror("send");
+		if (recvErrChk("requestFlac", recv(fd, &findingFlac, sizeof(findingFlac), 0))){
 			exit(EXIT_FAILURE);
 		}
 		if (findingFlac){
@@ -182,33 +172,13 @@ int socketAndConnect(struct addrinfo* servInfo){
 	return sockfd;
 }
 
-// Returns an addrinfo for the (supposed) server
-struct addrinfo* getServerInfo(char* addr, char* port){
-	struct addrinfo aHints;
-	struct addrinfo *servInfo;
-
-	memset(&aHints, 0, sizeof(aHints));
-	aHints.ai_family = AF_UNSPEC;
-	aHints.ai_socktype = SOCK_STREAM; // TCP
-	aHints.ai_flags = AI_PASSIVE;
-
-	int status;
-	if ((status = getaddrinfo(addr, port, &aHints, &servInfo)) != 0){
-		fprintf(stderr,"getaddrinfo : (%s)\n", gai_strerror(status));
-		exit(EXIT_FAILURE);
-	}
-
-	printf("Found %s...\n", addr);
-	return servInfo;
-}
-
 int main(int argc, char* argv[]){
 	if (argc != 3) {
 		fprintf(stderr, "USAGE : client ADDRESS PORT\n");
 		exit(EXIT_FAILURE);
 	}
 
-	struct addrinfo *servInfo = getServerInfo(argv[1], argv[2]);
+	struct addrinfo *servInfo = getNetInfo(argv[1], argv[2]);
 	int sockfd = socketAndConnect(servInfo);
 
 	requestFlac(sockfd);
@@ -238,19 +208,20 @@ int main(int argc, char* argv[]){
 	inputCode* globalCode = &code;
 
 	// Start thread to receive and play pcm
-	uint32_t segSize = (format.bits * 2) * SAMPL_PER_SEG;
-	struct recvPCMargs pcmArgs = {sockfd, device, segSize, globalCode};
+	int segSize = format.bits * SAMPL_PER_SEG;
+	recvPCMargs pcmArgs = {sockfd, device, segSize, globalCode};
 	pthread_t pcmThread;
 	pthread_create(&pcmThread, NULL, recvPCM, &pcmArgs);
 
 	// Start thread to take user input
+	usrCtrlArgs ctrlArgs = {sockfd, globalCode};
 	pthread_t usrCtrlThread;
-	pthread_create(&usrCtrlThread, NULL, usrCtrl, globalCode);
+	pthread_create(&usrCtrlThread, NULL, usrCtrl, &ctrlArgs);
 
 	// Exiting
-	pthread_join(pcmThread, NULL);
-	//pthread_join(usrCtrlThread, NULL);
+	pthread_join(usrCtrlThread, NULL);
 	freeaddrinfo(servInfo);
+	close(sockfd);
 	ao_close(device);
 	ao_shutdown();
 	return EXIT_SUCCESS;
