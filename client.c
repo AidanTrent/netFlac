@@ -23,6 +23,11 @@ typedef struct{
 	inputCode* globalCode;
 } recvPCMargs;
 
+// Thread pausing
+pthread_cond_t playPauseCond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t playPauseLock = PTHREAD_MUTEX_INITIALIZER;
+uint8_t paused = 0;
+
 void* usrCtrl(void* voidArgs){
 	usrCtrlArgs* args = voidArgs;
 
@@ -41,8 +46,15 @@ void* usrCtrl(void* voidArgs){
 				fflush(stdout);
 				break;
 			case 'p':
+				if (paused){
+					paused = 0;
+					pthread_cond_signal(&playPauseCond);
+				}
+				else{
+					paused = 1;
+				}
 				*args->globalCode = PlayPause;
-				printf("Play/Pause...\n");
+				printf("Pause...\n");
 				fflush(stdout);
 				break;
 			default:
@@ -67,21 +79,26 @@ void* recvPCM(void* voidArgs){
 	int segProg;
 	uint8_t receiving = 1;
 	while (receiving){
+		// User input play/pause thread
+		while(paused){
+			pthread_cond_wait(&playPauseCond, &playPauseLock);
+		}
+
 		// TODO : buffering
 		// PCM stream
 		segProg = 0;
 		while (segProg != args->segSize){
 			recvBytes = recv(args->fd, seg, args->segSize - segProg, 0);
 			recvErrChk("recvPCM", recvBytes);
-
-			ao_play(args->device, seg, recvBytes);
-			segProg += recvBytes;
-
 			// Exit when server is no longer sending
 			if (recvBytes == 0){
 				segProg = args->segSize;
 				receiving = 0;
+				break;
 			}
+
+			ao_play(args->device, seg, recvBytes);
+			segProg += recvBytes;
 		}
 	}
 
